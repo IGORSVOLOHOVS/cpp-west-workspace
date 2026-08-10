@@ -90,12 +90,20 @@ west build-all --help
 | **CMake ≥ 3.25** | пресеты из `CMakePresets.json` | `cmake --version` |
 | **Ninja** | генератор, который используют пресеты | `ninja --version` |
 | **Conan 2** | зависимости (Boost, OpenSSL, GTest) | `conan --version` |
-| **Python 3.8+ и west** | сам воркспейс | `west --version` |
+| **Python 3.9+ и west** | сам воркспейс | `west --version` |
 | **Git** | клонирование | `git --version` |
 
 Отдельно входить в Developer PowerShell не нужно: `build_windows.ps1` каждого
 проекта сам находит Visual Studio через `vswhere` и вносит окружение MSVC в свой
 процесс.
+
+Один проект требует большего. **CppMiddleProject8** — это clang-tool, ему нужна
+девелоперская поставка LLVM/Clang 19+ (заголовки и `lib\cmake\clang\ClangConfig.cmake`).
+Обычного установщика `LLVM-<версия>-win64.exe` не хватает: в нём только `clang.exe`
+и C API. Нужен архив `clang+llvm-<версия>-x86_64-pc-windows-msvc.tar.xz` с той же
+страницы релиза; распаковать куда угодно и указать путь через переменную окружения
+`CT_CLANG_INSTALL_DIR`. Без этого `west build-all` соберёт восемь проектов из девяти
+и честно покажет `ПРОВАЛ` на восьмом.
 
 Первый `west build-all` заметно дольше последующих: Conan скачивает пакеты, а
 часть зависимостей в некоторых проектах собирается из исходников (Boost, LLVM) —
