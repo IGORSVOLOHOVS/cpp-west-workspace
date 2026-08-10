@@ -97,18 +97,45 @@ west build-all --help
 проекта сам находит Visual Studio через `vswhere` и вносит окружение MSVC в свой
 процесс.
 
+`pip install west` на Windows кладёт `west.exe` в
+`%APPDATA%\Python\Python3XX\Scripts`, и этого каталога в `PATH` может не быть.
+Если оболочка не находит команду, добавьте каталог в `PATH` (или зовите
+`python -m west` — работает так же).
+
 Один проект требует большего. **CppMiddleProject8** — это clang-tool, ему нужна
 девелоперская поставка LLVM/Clang 19+ (заголовки и `lib\cmake\clang\ClangConfig.cmake`).
 Обычного установщика `LLVM-<версия>-win64.exe` не хватает: в нём только `clang.exe`
 и C API. Нужен архив `clang+llvm-<версия>-x86_64-pc-windows-msvc.tar.xz` с той же
-страницы релиза; распаковать куда угодно и указать путь через переменную окружения
-`CT_CLANG_INSTALL_DIR`. Без этого `west build-all` соберёт восемь проектов из девяти
-и честно покажет `ПРОВАЛ` на восьмом.
+страницы релиза:
+
+```powershell
+curl.exe -L -o "$env:TEMP\clang+llvm.tar.xz" `
+  https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.8/clang+llvm-20.1.8-x86_64-pc-windows-msvc.tar.xz
+New-Item -ItemType Directory -Force C:\LLVM | Out-Null
+python -m tarfile -e "$env:TEMP\clang+llvm.tar.xz" C:\LLVM
+```
+
+Распаковка идёт Python-ом не от хорошей жизни: `tar.exe`, встроенный в Windows 10
+(bsdtar 3.5.2), собран без LZMA и на `tar -xJf` падает с
+`Can't initialize filter; unable to run program "xz -d -qq"`. Python здесь и так
+нужен — на нём работает сам west. На Python 3.12+ команда печатает
+`DeprecationWarning` про будущий фильтр по умолчанию; это не ошибка.
+
+Внутри архива один каталог, `clang+llvm-20.1.8-x86_64-pc-windows-msvc`, так что
+после распаковки путь получается `C:\LLVM\clang+llvm-20.1.8-x86_64-pc-windows-msvc`.
+Распакованный в `C:\LLVM\` дистрибутив `scripts\build_windows.ps1` находит сам —
+ни переменной окружения, ни ключа не нужно. Лежит в другом месте — задайте
+`CT_CLANG_INSTALL_DIR`. Без дистрибутива `west build-all` соберёт восемь проектов
+из девяти и честно покажет `ПРОВАЛ` на восьмом. Проверено на 20.1.8: архив
+896 МиБ, около 4 ГиБ после распаковки, та же мажорная версия, что и LLVM 20 в
+dev-контейнере этого проекта.
 
 Первый `west build-all` заметно дольше последующих: Conan скачивает пакеты, а
-часть зависимостей в некоторых проектах собирается из исходников (Boost, LLVM) —
-это часы, а не минуты. `--build-type Debug` дольше `Release`: готовых Debug-бинарников
-для MSVC в conan-center нет.
+часть зависимостей в некоторых проектах собирается из исходников (Boost) — это
+часы, а не минуты. Clang/LLVM в этот счёт не входит: он не идёт через Conan и не
+собирается из исходников, а берётся готовым из архива выше.
+`--build-type Debug` дольше `Release`: готовых Debug-бинарников для MSVC
+в conan-center нет.
 
 ## Docker никуда не делся
 
