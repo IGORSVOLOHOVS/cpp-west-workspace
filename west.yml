@@ -1,0 +1,72 @@
+# West manifest for the nine C++ repositories of this workspace.
+#
+# Why a manifest at all: the nine projects are independent GitHub
+# repositories that share one toolchain story (CMake presets + Conan +
+# MSVC on Windows, Docker devcontainer on Linux). Without a manifest a
+# person has to clone nine URLs by hand and remember that one of them
+# does not live on "main". With it, "west init -m <this repo>" followed
+# by "west update" reproduces the whole tree, on the right revisions,
+# every time.
+#
+# Revisions are pinned to the real default branch of each repository,
+# checked with: gh api repos/IGORSVOLOHOVS/<name> --jq .default_branch
+# Note CppMiddleProject7: it has never had a "main" branch, its default
+# branch is "initial". Writing "main" there would make "west update"
+# fail on that one project only, which is exactly the kind of breakage
+# a manifest is supposed to prevent.
+manifest:
+  remotes:
+    - name: IGORSVOLOHOVS
+      url-base: https://github.com/IGORSVOLOHOVS
+
+  defaults:
+    remote: IGORSVOLOHOVS
+
+  projects:
+    - name: CppMiddleProject1
+      revision: main
+      path: projects/CppMiddleProject1
+
+    - name: CppMiddleProject2
+      revision: main
+      path: projects/CppMiddleProject2
+
+    - name: CppMiddleProject3
+      revision: main
+      path: projects/CppMiddleProject3
+
+    - name: CppMiddleProject4
+      revision: main
+      path: projects/CppMiddleProject4
+
+    - name: CppMiddleProject5
+      revision: main
+      path: projects/CppMiddleProject5
+
+    - name: CppMiddleProject6
+      revision: main
+      path: projects/CppMiddleProject6
+
+    # The only project whose default branch is not "main".
+    - name: CppMiddleProject7
+      revision: initial
+      path: projects/CppMiddleProject7
+
+    - name: CppMiddleProject8
+      revision: main
+      path: projects/CppMiddleProject8
+
+    - name: Mandelbrot-Fractal
+      revision: main
+      path: projects/Mandelbrot-Fractal
+
+  # "self" describes the manifest repository itself inside the workspace.
+  # The west-commands key is what turns this repository into the provider
+  # of "west build-all" and "west build-one": west reads the referenced
+  # YAML file out of the manifest repository and registers the commands
+  # it lists, so the umbrella commands are available as soon as
+  # "west init" has cloned this repository, before "west update" has
+  # cloned anything else.
+  self:
+    path: cpp-west-workspace
+    west-commands: west-commands.yml

@@ -1,0 +1,20 @@
+# Registration of this workspace's west extension commands.
+#
+# West discovers this file through the "west-commands" key of the "self"
+# section in west.yml, validates it against its own schema, and imports
+# the referenced Python file to obtain the listed classes.
+#
+# Both commands come from a single Python file on purpose: west imports
+# an extension file directly from its path and never puts the containing
+# directory on sys.path, so one file cannot import a sibling file next
+# to it. Sharing code between the two commands therefore means sharing a
+# module.
+west-commands:
+  - file: scripts/west_commands/cpp_build_commands.py
+    commands:
+      - name: build-all
+        class: BuildAllProjectsCommand
+        help: собрать все проекты воркспейса нативно под Windows (MSVC)
+      - name: build-one
+        class: BuildOneProjectCommand
+        help: собрать один проект воркспейса нативно под Windows (MSVC)
