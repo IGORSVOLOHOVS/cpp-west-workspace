@@ -15,8 +15,13 @@ placed next to this one could therefore not be imported from here, so
 shared helpers and both command classes have to share a module.
 """
 
-from __future__ import annotations
-
+# Deliberately no "from __future__ import annotations" here. West imports
+# this file with importlib.util.module_from_spec and never registers the
+# result in sys.modules, so sys.modules[cls.__module__] is None for every
+# class defined below. With string annotations, @dataclass tries exactly
+# that lookup to resolve them and dies with "NoneType has no attribute
+# __dict__" before west can even print --help. Evaluated annotations cost
+# nothing here and keep the commands loadable.
 import argparse
 import os
 import shutil
@@ -89,21 +94,36 @@ def format_duration(duration_seconds: float) -> str:
 
 
 def decode_console_bytes(raw_bytes: bytes) -> str:
-    """Decode one line of PowerShell output into text.
+    """Decode one line of build output into text.
 
-    Windows PowerShell writes redirected output in the console OEM code
-    page (cp866 on a Russian Windows), not UTF-8, and the build scripts
-    print Russian. Decoding as UTF-8 would turn every progress line into
-    replacement characters, so the OEM codec is tried first. ``errors``
-    is always forgiving: a garbled byte in a compiler message must never
-    crash the umbrella command that was supposed to report on it.
+    The build scripts are asked to emit UTF-8 (see
+    ``build_powershell_command_line``), so UTF-8 is tried first. Native
+    tools invoked by those scripts - cl.exe, cmake, conan - write to the
+    same handle directly, bypassing PowerShell's encoder, and use the
+    console OEM code page instead; that is the fallback. The last resort
+    never raises, because a garbled byte in a compiler message must not
+    crash the umbrella command that exists to report on it.
     """
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
     if os.name == "nt":
         try:
             return raw_bytes.decode("oem", errors="replace")
         except LookupError:  # pragma: no cover - non-Windows Python build
             pass
     return raw_bytes.decode("utf-8", errors="replace")
+
+
+def quote_for_powershell_single_quotes(text: str) -> str:
+    """Wrap text in PowerShell single quotes, escaping embedded ones.
+
+    Single quotes are used rather than double quotes because PowerShell
+    performs no expansion inside them: a workspace checked out under a
+    path containing ``$`` or a backtick must not be reinterpreted.
+    """
+    return "'" + text.replace("'", "''") + "'"
 
 
 def write_text_to_stdout(text: str) -> None:
@@ -141,6 +161,62 @@ class BuildInvocationOptions:
     build_type: str
     clean: bool
     skip_tests: bool
+
+
+def build_powershell_command_line(
+    powershell_executable: str,
+    build_script_path: Path,
+    options: BuildInvocationOptions,
+) -> list[str]:
+    """Compose the command line that runs one project's build script.
+
+    Why ``-Command`` and not the more obvious ``-File``: with ``-File``
+    the script's Russian progress output is destroyed before this
+    process can read it. Redirected Windows PowerShell output is encoded
+    with the console OEM code page, which on a Latin-locale machine
+    cannot represent Cyrillic, so every message arrives as a row of
+    question marks - and no decoding on this side can recover it.
+    ``-Command`` allows ``[Console]::OutputEncoding`` to be set to UTF-8
+    *before* the script runs, which fixes the output at the source.
+
+    The price of ``-Command`` is that the script's exit code no longer
+    becomes the process exit code automatically, hence the explicit
+    ``exit $LASTEXITCODE``. ``$LASTEXITCODE`` is pre-set to 0 so that a
+    script which finishes without running any native command is reported
+    as success rather than inheriting a stale value. A script that dies
+    from an unhandled terminating error never reaches that line, and
+    PowerShell then exits 1 on its own - which is the outcome we want.
+    """
+    script_arguments = ["-BuildType", options.build_type]
+    if options.clean:
+        script_arguments.append("-Clean")
+    if options.skip_tests:
+        script_arguments.append("-SkipTests")
+
+    powershell_statements = "; ".join(
+        [
+            "$global:LASTEXITCODE = 0",
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+            "& "
+            + quote_for_powershell_single_quotes(str(build_script_path))
+            + " "
+            + " ".join(script_arguments),
+            "exit $LASTEXITCODE",
+        ]
+    )
+
+    return [
+        powershell_executable,
+        "-NoProfile",
+        "-NonInteractive",
+        # Projects are checked out fresh by "west update" and are
+        # therefore unsigned local scripts; without this the default
+        # execution policy refuses to run them.
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        powershell_statements,
+    ]
 
 
 class WindowsNativeBuildCommandBase(WestCommand):
@@ -280,27 +356,9 @@ class WindowsNativeBuildCommandBase(WestCommand):
                 detail=f"нет файла {RELATIVE_BUILD_SCRIPT_PATH}",
             )
 
-        command_line = [
-            powershell_executable,
-            "-NoProfile",
-            "-NonInteractive",
-            # The projects are checked out fresh by "west update" and are
-            # therefore unsigned local scripts; without this the default
-            # execution policy refuses to run them.
-            "-ExecutionPolicy",
-            "Bypass",
-            # "-File" rather than "-Command": with "-File" the script's
-            # own "exit 1" becomes powershell.exe's exit code, which is
-            # the only reliable way to learn that a build failed.
-            "-File",
-            str(build_script_path),
-            "-BuildType",
-            options.build_type,
-        ]
-        if options.clean:
-            command_line.append("-Clean")
-        if options.skip_tests:
-            command_line.append("-SkipTests")
+        command_line = build_powershell_command_line(
+            powershell_executable, build_script_path, options
+        )
 
         log_directory.mkdir(parents=True, exist_ok=True)
         log_file_path = log_directory / f"{project.name}.log"
