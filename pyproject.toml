@@ -1,0 +1,74 @@
+# pyproject.toml - Python's own file for cpp-west-workspace.
+#
+# It pins the toolchain. `recipe.ps1 test` runs pytest, mypy, ruff check and ruff
+# format, and every setting those four read is here. There are no task-runner
+# sections: the recipe's verbs are the tasks.
+
+[build-system]
+# Pinned with a version, not a bare name: an unpinned backend changes what
+# `recipe.ps1 build` produces without anyone editing this file.
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cpp-west-workspace"
+# This must equal $Version in recipe.ps1: `recipe.ps1 test` fails when they disagree.
+version = "1.0.0"
+description = "West extension commands that build the C++ projects of a west workspace through each project's own build script."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13,<3.14"
+# west loads the commands; uv.lock pins it.
+dependencies = [
+    "west>=1.2",
+]
+
+[dependency-groups]
+# `uv run` installs this group by default, so test.yaml's Runner health step finds
+# ruff, pytest and mypy through `uv run --frozen <tool> --version`.
+dev = [
+    "ruff==0.16.1",
+    "mypy==2.3.0",
+    "pytest==8.4.2",
+    "pytest-cov==5.0.0",
+    "coverage==7.15.2",
+]
+
+[tool.setuptools]
+# One module, where west-commands.yml expects it.
+package-dir = { "" = "scripts/west_commands" }
+py-modules = ["cpp_build_commands"]
+
+[tool.uv]
+# The tests and `recipe.ps1 run` use the source tree, so uv does not install the project.
+package = false
+
+[tool.ruff]
+# Ruff refuses to run at all when its own version is not this one.
+required-version = "0.16.1"
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.format]
+line-ending = "lf"
+# Section 7 prints these files verbatim, so the formatter must not touch them.
+exclude = [".claude/**", "tests/manual/serve.py", "tools/wiki.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+# west imports the module by its path; the tests import it the same way and by name.
+pythonpath = ["scripts/west_commands"]
+# Measured on adoption: 220 of 220 statements, 100%. The floor is the whole number below.
+addopts = "-q --cov=scripts/west_commands --cov-report=term --cov-fail-under=99"
+
+[tool.mypy]
+python_version = "3.13"
+files = ["scripts/west_commands", "tools"]
+
+
+# THE SILENCE LIST, measured on adoption: it only ever gets shorter (R-12).
+# Empty: west ships its own types, and none of this repository's own code is silenced.
