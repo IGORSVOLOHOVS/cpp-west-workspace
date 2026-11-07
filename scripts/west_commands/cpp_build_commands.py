@@ -197,10 +197,7 @@ def build_powershell_command_line(
         [
             "$global:LASTEXITCODE = 0",
             "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-            "& "
-            + quote_for_powershell_single_quotes(str(build_script_path))
-            + " "
-            + " ".join(script_arguments),
+            "& " + quote_for_powershell_single_quotes(str(build_script_path)) + " " + " ".join(script_arguments),
             "exit $LASTEXITCODE",
         ]
     )
@@ -244,8 +241,8 @@ class WindowsNativeBuildCommandBase(WestCommand):
             choices=("Release", "Debug"),
             default="Release",
             help="конфигурация сборки (по умолчанию Release; Debug для "
-                 "многих проектов означает сборку Boost/OpenSSL из "
-                 "исходников, то есть часы работы)",
+            "многих проектов означает сборку Boost/OpenSSL из "
+            "исходников, то есть часы работы)",
         )
         parser.add_argument(
             "--clean",
@@ -270,15 +267,9 @@ class WindowsNativeBuildCommandBase(WestCommand):
         script. Filtering it out here keeps every caller from having to
         remember that.
         """
-        return [
-            project
-            for project in self.manifest.projects
-            if not isinstance(project, ManifestProject)
-        ]
+        return [project for project in self.manifest.projects if not isinstance(project, ManifestProject)]
 
-    def select_projects_by_name(
-        self, requested_names: Iterable[str]
-    ) -> list[Project]:
+    def select_projects_by_name(self, requested_names: Iterable[str]) -> list[Project]:
         """Resolve user-supplied names to manifest projects.
 
         Matching is case-insensitive because the names are long and
@@ -287,19 +278,14 @@ class WindowsNativeBuildCommandBase(WestCommand):
         failure mode that makes a build command untrustworthy.
         """
         all_projects = self.list_manifest_projects()
-        projects_by_lowercase_name = {
-            project.name.lower(): project for project in all_projects
-        }
+        projects_by_lowercase_name = {project.name.lower(): project for project in all_projects}
 
         selected_projects: list[Project] = []
         for requested_name in requested_names:
             project = projects_by_lowercase_name.get(requested_name.lower())
             if project is None:
                 known = ", ".join(project.name for project in all_projects)
-                self.die(
-                    f"проект '{requested_name}' не описан в west.yml. "
-                    f"Известные проекты: {known}"
-                )
+                self.die(f"проект '{requested_name}' не описан в west.yml. Известные проекты: {known}")
             if project not in selected_projects:
                 selected_projects.append(project)
         return selected_projects
@@ -346,6 +332,8 @@ class WindowsNativeBuildCommandBase(WestCommand):
                 detail="каталог проекта отсутствует — сначала 'west update'",
             )
 
+        # is_cloned() returned True above, so the project has a path.
+        assert project.abspath is not None
         project_directory = Path(project.abspath)
         build_script_path = project_directory / RELATIVE_BUILD_SCRIPT_PATH
         if not build_script_path.is_file():
@@ -356,9 +344,7 @@ class WindowsNativeBuildCommandBase(WestCommand):
                 detail=f"нет файла {RELATIVE_BUILD_SCRIPT_PATH}",
             )
 
-        command_line = build_powershell_command_line(
-            powershell_executable, build_script_path, options
-        )
+        command_line = build_powershell_command_line(powershell_executable, build_script_path, options)
 
         log_directory.mkdir(parents=True, exist_ok=True)
         log_file_path = log_directory / f"{project.name}.log"
@@ -427,6 +413,8 @@ class WindowsNativeBuildCommandBase(WestCommand):
                 "на Linux/macOS пользуйтесь .devcontainer каждого проекта."
             )
 
+        # west sets topdir before it runs a command that needs a workspace.
+        assert self.topdir is not None
         log_directory = Path(self.topdir) / RELATIVE_BUILD_LOG_DIRECTORY
 
         # Serial runs stream the build output live, because a silent
@@ -434,15 +422,10 @@ class WindowsNativeBuildCommandBase(WestCommand):
         # from a hang. Parallel runs cannot stream: interleaved output
         # from several compilers is worse than no output, so there the
         # log files are the record.
-        stream_output_to_terminal = job_count == 1
-
         if job_count == 1:
             results: list[ProjectBuildResult] = []
             for position, project in enumerate(projects, start=1):
-                self.inf(
-                    f"\n=== [{position}/{len(projects)}] Собираю "
-                    f"{project.name} ==="
-                )
+                self.inf(f"\n=== [{position}/{len(projects)}] Собираю {project.name} ===")
                 result = self.build_single_project(
                     project,
                     options,
@@ -475,10 +458,7 @@ class WindowsNativeBuildCommandBase(WestCommand):
 
     def report_finished_build(self, result: ProjectBuildResult) -> None:
         """Announce one finished build as soon as it is known."""
-        message = (
-            f"<-- {result.project_name}: {result.outcome} "
-            f"({format_duration(result.duration_seconds)})"
-        )
+        message = f"<-- {result.project_name}: {result.outcome} ({format_duration(result.duration_seconds)})"
         if result.succeeded:
             self.inf(message)
         else:
@@ -494,20 +474,13 @@ class WindowsNativeBuildCommandBase(WestCommand):
             self.wrn("нечего собирать: выборка проектов пуста")
             return
 
-        name_column_width = max(
-            len("ПРОЕКТ"), max(len(result.project_name) for result in results)
-        )
-        outcome_column_width = max(
-            len("СТАТУС"), max(len(result.outcome) for result in results)
-        )
+        name_column_width = max(len("ПРОЕКТ"), max(len(result.project_name) for result in results))
+        outcome_column_width = max(len("СТАТУС"), max(len(result.outcome) for result in results))
 
         write_text_to_stdout("\n")
         write_text_to_stdout("=" * (name_column_width + outcome_column_width + 24))
         write_text_to_stdout("\n")
-        write_text_to_stdout(
-            f"{'ПРОЕКТ':<{name_column_width}}  "
-            f"{'СТАТУС':<{outcome_column_width}}  ВРЕМЯ\n"
-        )
+        write_text_to_stdout(f"{'ПРОЕКТ':<{name_column_width}}  {'СТАТУС':<{outcome_column_width}}  ВРЕМЯ\n")
         write_text_to_stdout("-" * (name_column_width + outcome_column_width + 24))
         write_text_to_stdout("\n")
         for result in results:
@@ -523,16 +496,10 @@ class WindowsNativeBuildCommandBase(WestCommand):
         write_text_to_stdout("\n")
 
         succeeded_count = sum(1 for result in results if result.succeeded)
-        write_text_to_stdout(
-            f"Итог: собрано {succeeded_count} из {len(results)}\n"
-        )
-        log_paths = [
-            result.log_file_path for result in results if result.log_file_path
-        ]
+        write_text_to_stdout(f"Итог: собрано {succeeded_count} из {len(results)}\n")
+        log_paths = [result.log_file_path for result in results if result.log_file_path]
         if log_paths:
-            write_text_to_stdout(
-                f"Полные логи: {log_paths[0].parent}\n"
-            )
+            write_text_to_stdout(f"Полные логи: {log_paths[0].parent}\n")
 
     def finish_with_exit_code(self, results: list[ProjectBuildResult]) -> None:
         """Fail the command if a single requested build did not succeed.
@@ -579,8 +546,7 @@ scripts\\build_windows.ps1 (окружение MSVC, Conan, CMake-пресет, 
             action="append",
             default=[],
             metavar="ИМЯ",
-            help="собрать только указанные проекты; можно повторять флаг "
-                 "или перечислить имена через запятую",
+            help="собрать только указанные проекты; можно повторять флаг или перечислить имена через запятую",
         )
         parser.add_argument(
             "-j",
@@ -589,9 +555,9 @@ scripts\\build_windows.ps1 (окружение MSVC, Conan, CMake-пресет, 
             default=1,
             metavar="N",
             help="сколько проектов собирать одновременно (по умолчанию 1). "
-                 "Больше единицы ускоряет прогон, но параллельные проекты "
-                 "делят один кеш Conan и вывод сборок перестаёт печататься "
-                 "в терминал — смотрите build-logs/",
+            "Больше единицы ускоряет прогон, но параллельные проекты "
+            "делят один кеш Conan и вывод сборок перестаёт печататься "
+            "в терминал — смотрите build-logs/",
         )
         self.add_shared_build_arguments(parser)
         return parser
@@ -611,10 +577,7 @@ scripts\\build_windows.ps1 (окружение MSVC, Conan, CMake-пресет, 
             clean=args.clean,
             skip_tests=args.skip_tests,
         )
-        self.inf(
-            f"Проектов к сборке: {len(projects)}; конфигурация "
-            f"{options.build_type}; параллельно: {args.jobs}"
-        )
+        self.inf(f"Проектов к сборке: {len(projects)}; конфигурация {options.build_type}; параллельно: {args.jobs}")
         results = self.build_projects(projects, options, args.jobs)
         self.print_summary_table(results)
         self.finish_with_exit_code(results)
@@ -646,8 +609,7 @@ class BuildOneProjectCommand(WindowsNativeBuildCommandBase):
         parser.add_argument(
             "project",
             metavar="ПРОЕКТ",
-            help="имя проекта так, как оно записано в west.yml "
-                 "(регистр не важен)",
+            help="имя проекта так, как оно записано в west.yml (регистр не важен)",
         )
         self.add_shared_build_arguments(parser)
         return parser
