@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Manual tests</title>
+<style>
+  body { font-family: Segoe UI, sans-serif; margin: 2rem auto; max-width: 60rem; }
+  #bar { color: #555; margin-bottom: 1rem; }
+  #log { color: #b00; white-space: pre-wrap; margin-top: 1rem; }
+  .row { border: 1px solid #ddd; border-radius: 6px; padding: .7rem 1rem; margin: .5rem 0; }
+  .row h3 { margin: 0 0 .3rem; font-size: 1rem; }
+  .badge { display: inline-block; min-width: 6.5rem; text-align: center; border-radius: 4px;
+           padding: .1rem .5rem; color: #fff; margin-right: .7rem; }
+  .none { background: #999; } .progress { background: #2b6cb0; }
+  .fail { background: #c53030; } .success { background: #2f855a; } .na { background: #b7791f; }
+  .soft { font-size: .8rem; color: #975a16; margin-left: .6rem; }
+  .needs { margin: .2rem 0; color: #444; font-size: .9rem; }
+  details { margin: .3rem 0; color: #444; }
+  button { margin-right: .4rem; }
+  #done { font-size: 1.05rem; padding: .4rem 1.2rem; margin-top: 1rem; }
+  #banner { padding: .7rem 1rem; border-radius: 6px; margin-top: 1rem; display: none; }
+</style>
+</head>
+<body>
+<h1>Manual tests</h1>
+<div id="bar">Loading...</div>
+<div id="tests"></div>
+<button id="done" style="display:none">Done</button>
+<div id="banner"></div>
+<div id="log"></div>
+<script>
+'use strict';
+// Open this page through serve.py (§9). serve.py adds the key to every /api
+// call; the page never holds one.
+const ID = /^[a-z0-9][a-z0-9_-]{0,60}$/;
+let repo = null, pr = null, prUrl = '', sha = null, me = null, tests = [], timer = null;
+
+function el(id) { return document.getElementById(id); }
+function log(m) { el('log').textContent = m; }
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+function bar(note) {
+  el('bar').textContent = 'PR #' + pr + '  ·  ' + sha.slice(0, 10) + '  ·  ' + me + (note ? '  ·  ' + note : '');
+}
+function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({ 'X-Manual-Page': '1' }, opts.headers || {});
+  return fetch('/api/v1' + path, opts).then(function (r) {
+    if (!r.ok) {
+      return r.text().then(function (t) { throw new Error(r.status + ' on ' + path + ': ' + t.slice(0, 200)); });
+    }
+    return r.status === 204 ? null : r.json();
+  }, function () {
+    throw new Error('cannot reach serve.py - is "python tests/manual/serve.py" still running?');
+  });
+}
+function post(at, context, state, description) {
+  return api('/repos/' + repo + '/statuses/' + at, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ context: context, state: state,
+      description: (description || '').slice(0, 255), target_url: prUrl })
+  });
+}
+// The same rules recipe test applies (§9): refuse the whole file before
+// anything reaches an HTML attribute or a status name.
+function checked(j) {
+  const list = j ? j.tests : null;
+  if (!Array.isArray(list)) { throw new Error('tests.json: "tests" is not a list'); }
+  const seen = {};
+  list.forEach(function (t) {
+    const id = t ? t.id : null;
+    if (typeof id !== 'string' || !ID.test(id)) { throw new Error('tests.json: id ' + JSON.stringify(id) + ' does not match ' + ID); }
+    if (id === 'verdict') { throw new Error('tests.json: "verdict" is reserved - manual/verdict is the gate itself'); }
+    if (seen[id]) { throw new Error('tests.json: id ' + id + ' is used twice'); }
+    seen[id] = true;
+  });
+  return list;
+}
+function init() {
+  // Pages before 4.0.0 kept the server, the repository and a key here.
+  try { localStorage.removeItem('manual-tests-cfg'); } catch (e) {}
+  fetch('./tests.json', { cache: 'no-store' }).then(function (r) {
+    if (!r.ok) { throw new Error('tests/manual/tests.json: ' + r.status); }
+    return r.json().catch(function (e) { throw new Error('tests.json is not valid JSON: ' + e.message); });
+  }).then(function (j) {
+    tests = checked(j);
+    return fetch('./repo.json').then(function (r) {
+      if (!r.ok) { throw new Error('open this page through "python tests/manual/serve.py"'); }
+      return r.json();
+    });
+  }).then(function (info) {
+    repo = info.repo;
+    return api('/repos/' + repo + '/pulls?state=open&limit=50');
+  }).then(function (pulls) {
+    const p = pulls.filter(function (x) { return x.base.ref === 'release' && x.head.ref === 'test'; })[0];
+    if (!p) { el('bar').textContent = 'No open test → release pull request. Nothing to verdict.'; return; }
+    pr = p.number; prUrl = p.html_url; sha = p.head.sha;
+    return api('/user').then(function (u) {
+      me = u.login;
+      bar('');
+      if (tests.length === 0) {
+        el('tests').innerHTML = '<p>No manual tests — the gate passes automatically.</p>';
+        return;
+      }
+      render();
+      el('done').style.display = 'inline-block';
+      refresh(); timer = setInterval(refresh, 15000);
+    });
+  }).catch(function (e) { el('bar').textContent = ''; log(e.message); });
+}
+function render() {
+  el('tests').innerHTML = tests.map(function (t) {
+    const soft = t.blocking === false;
+    const steps = (t.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('');
+    const issue = Number.isInteger(t.issue)
+      ? ' <a href="/' + esc(repo) + '/issues/' + t.issue + '" target="_blank">#' + t.issue + '</a>' : '';
+    function btn(act, label) { return '<button data-act="' + act + '" data-id="' + t.id + '">' + label + '</button>'; }
+    return '<div class="row">' +
+      '<h3><span class="badge none" id="badge-' + t.id + '">none</span>' + esc(t.id) + ' — ' +
+        esc(t.title || '') + issue + (soft ? '<span class="soft">non-blocking</span>' : '') + '</h3>' +
+      (t.needs ? '<p class="needs">Needs: ' + esc(t.needs) + '</p>' : '') +
+      (steps || t.expected ? '<details><summary>steps</summary><ol>' + steps + '</ol>' +
+        '<p>Expected: ' + esc(t.expected || '') + '</p></details>' : '') +
+      btn('start', 'Start') + btn('pass', 'Pass') + btn('fail', 'Fail') + (soft ? btn('na', 'N/A') : '') +
+      '<input id="note-' + t.id + '" placeholder="' + (soft ? 'note for Fail; required for N/A' : 'note for Fail') + '" size="40"> ' +
+      '<input type="file" id="file-' + t.id + '" title="evidence: screenshot, photo, log">' +
+      '</div>';
+  }).join('');
+}
+// Evidence is a bonus, not a condition: a failed upload is reported and the
+// verdict is posted without its "+evidence" mark.
+function upload(id, at) {
+  const f = el('file-' + id);
+  if (!f || !f.files.length) { return Promise.resolve(''); }
+  const parts = repo.split('/');
+  const name = f.files[0].name.replace(/[^A-Za-z0-9._-]/g, '_');
+  const path = '/api/packages/' + parts[0] + '/generic/' + parts[1] + '-manual-evidence/' +
+               at + '/' + id + '-' + name;
+  return fetch(path, { method: 'PUT', headers: { 'X-Manual-Page': '1' }, body: f.files[0] })
+    .then(function (r) {
+      if (!r.ok && r.status !== 409) { throw new Error(String(r.status)); }
+      return ' +evidence';
+    }).catch(function (e) {
+      log('The evidence for ' + id + ' did not upload (' + e.message +
+          '; the key needs write:package). The verdict is posted without it.');
+      return '';
+    });
+}
+function mark(id, act) {
+  const t = tests.filter(function (x) { return x.id === id; })[0];
+  if (!t || (act === 'na' && t.blocking !== false)) { return; }
+  const at = sha, note = el('note-' + id).value.trim();
+  if (act === 'na' && !note) { log('N/A needs a note: say why ' + id + ' cannot be run here.'); return; }
+  log('');
+  const call = act === 'start'
+    ? post(at, 'manual/' + id, 'pending', 'in progress')
+    : upload(id, at).then(function (tag) {
+        if (act === 'pass') { return post(at, 'manual/' + id, 'success', 'passed by ' + me + tag); }
+        if (act === 'fail') { return post(at, 'manual/' + id, 'failure', (note || 'failed') + tag); }
+        return post(at, 'manual/' + id, 'warning', 'n/a: ' + note + tag);
+      });
+  call.then(refresh).catch(function (e) { log(e.message); });
+}
+function stateOf(s) { return s ? (s.status || s.state) : 'pending'; }
+function isNa(t, s) {
+  return t.blocking === false && stateOf(s) === 'warning' && (s.description || '').indexOf('n/a:') === 0;
+}
+// A push to test moves the pull request's head; follow it, and say so.
+function syncHead() {
+  return api('/repos/' + repo + '/pulls/' + pr).then(function (p) {
+    if (p.state !== 'open') {
+      clearInterval(timer);
+      throw new Error('PR #' + pr + ' is ' + (p.merged ? 'merged' : 'closed') + '. Nothing to verdict.');
+    }
+    if (p.head.sha !== sha) {
+      const old = sha;
+      sha = p.head.sha;
+      bar('test moved from ' + old.slice(0, 10) + ': pull test and run the round on this commit');
+    }
+  });
+}
+// The newest status per context, from every page: the server cuts a page at
+// app.ini [api] MAX_RESPONSE_ITEMS (50) whatever ?limit= asks (§8).
+function statuses() {
+  const at = sha, latest = {};
+  function page(n) {
+    return api('/repos/' + repo + '/commits/' + at + '/status?limit=50&page=' + n).then(function (c) {
+      const seen = Object.keys(latest).length;
+      (c.statuses || []).forEach(function (s) { latest[s.context] = s; });
+      return Object.keys(latest).length > seen && n < 40 ? page(n + 1) : latest;
+    });
+  }
+  return page(1);
+}
+function refresh() {
+  return syncHead().then(statuses).then(function (latest) {
+    tests.forEach(function (t) {
+      const s = latest['manual/' + t.id];
+      const st = stateOf(s), desc = s ? (s.description || '') : 'none';
+      const b = el('badge-' + t.id);
+      if (st === 'success') { set(b, 'success', 'success'); }
+      else if (isNa(t, s)) { set(b, 'na', desc); }
+      else if (st === 'failure' || st === 'error' || st === 'warning') {
+        set(b, 'fail', (st === 'failure' ? 'fail' : st) + ': ' + desc);
+      }
+      else if (desc === 'in progress') { set(b, 'progress', 'in progress'); }
+      else { set(b, 'none', 'none'); }
+    });
+  }).catch(function (e) { log(e.message); });
+}
+function set(b, cls, text) { b.className = 'badge ' + cls; b.textContent = text; }
+function done() {
+  const at = sha;
+  syncHead().then(function () {
+    if (sha !== at) { throw new Error('test moved while you tested. Check the rows against the new commit, then press Done again.'); }
+    return statuses();
+  }).then(function (latest) {
+    let k = 0, m = 0;
+    const red = [];
+    tests.forEach(function (t) {
+      const s = latest['manual/' + t.id];
+      if (stateOf(s) === 'success') { k += 1; }
+      else if (isNa(t, s)) { m += 1; }
+      else { red.push(t.id); }
+    });
+    const green = red.length === 0;
+    const desc = k + ' passed, ' + m + ' n/a of ' + tests.length +
+                 (green ? '' : '; not green: ' + red.join(', '));
+    return post(at, 'manual/verdict', green ? 'success' : 'failure', desc).then(function () {
+      const ban = el('banner');
+      ban.style.display = 'block';
+      ban.style.background = green ? '#c6f6d5' : '#fed7d7';
+      ban.textContent = green
+        ? 'All green. The workflow will finish; ask a reviewer to merge.'
+        : 'Verdict recorded: ' + desc + '. The release gate goes red.';
+    });
+  }).catch(function (e) { log(e.message); });
+}
+el('tests').addEventListener('click', function (ev) {
+  const b = ev.target.closest('button[data-act]');
+  if (b) { mark(b.getAttribute('data-id'), b.getAttribute('data-act')); }
+});
+el('done').addEventListener('click', done);
+init();
+</script>
+</body>
+</html>

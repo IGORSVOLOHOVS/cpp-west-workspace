@@ -1,8 +1,6 @@
 # cpp-west-workspace
 
-Зонтик над девятью C++-репозиториями: **один манифест, одна команда клонирования,
-одна команда сборки.** Сделано на [west](https://docs.zephyrproject.org/latest/develop/west/index.html)
-— том же менеджере воркспейсов, что и у Zephyr.
+An umbrella over nine C++ repositories: **one manifest, one command to clone them, one command to build them.** It is built on [west](https://docs.zephyrproject.org/latest/develop/west/index.html), the workspace manager Zephyr uses.
 
 ```powershell
 pip install west
@@ -12,158 +10,27 @@ west update
 west build-all
 ```
 
-Всё. `west update` клонирует девять репозиториев в `projects/`, `west build-all`
-собирает каждый нативно под MSVC и печатает таблицу «проект — статус — время».
+`west update` clones the nine repositories into `projects/`, and `west build-all` builds each one natively under MSVC and prints a table of project, status and time.
 
-## Что внутри
+## What is inside
 
-| Проект | Ветка | Путь после `west update` |
-| --- | --- | --- |
-| CppMiddleProject1 | `main` | `projects/CppMiddleProject1` |
-| CppMiddleProject2 | `main` | `projects/CppMiddleProject2` |
-| CppMiddleProject3 | `main` | `projects/CppMiddleProject3` |
-| CppMiddleProject4 | `main` | `projects/CppMiddleProject4` |
-| CppMiddleProject5 | `main` | `projects/CppMiddleProject5` |
-| CppMiddleProject6 | `main` | `projects/CppMiddleProject6` |
-| CppMiddleProject7 | **`initial`** | `projects/CppMiddleProject7` |
-| CppMiddleProject8 | `main` | `projects/CppMiddleProject8` |
-| Mandelbrot-Fractal | `main` | `projects/Mandelbrot-Fractal` |
+- `west.yml` lists CppMiddleProject1 to CppMiddleProject8 and Mandelbrot-Fractal, each pinned to its real default branch. CppMiddleProject7 has no `main`: its branch is `initial`, and the manifest remembers that so a person does not have to.
+- `west-commands.yml` registers two west extension commands, `build-all` and `build-one`, from `scripts/west_commands/cpp_build_commands.py`. They appear as soon as `west init` has cloned this repository.
 
-У CppMiddleProject7 ветки `main` не существует — ветка по умолчанию называется
-`initial`. Ровно ради таких мелочей и нужен манифест: помнить это должен файл,
-а не человек.
+The commands build nothing themselves. They run each project's own `scripts\build_windows.ps1`, which enters the MSVC environment, calls Conan when needed, configures CMake from `CMakePresets.json`, builds and runs ctest. The one definition of "this project builds" lives in the project.
 
-Итоговое дерево:
+Behaviour to rely on:
 
-```
-cpp-west/
-├── .west/                     служебный каталог west
-├── cpp-west-workspace/        этот репозиторий (манифест + команды)
-├── build-logs/                полный вывод каждой сборки
-└── projects/
-    ├── CppMiddleProject1/
-    ├── ...
-    └── Mandelbrot-Fractal/
-```
+- a build does not stop at the first failure;
+- the run ends with the table and the line `Итог: собрано N из M` (built N of M);
+- the exit code is 1 when any requested project failed;
+- the full output of every build goes to `build-logs/<project>.log` at the workspace top;
+- a project that is not cloned or has lost its `scripts\build_windows.ps1` counts as a failure, not a skip.
 
-## Команды
+## Use
 
-`west build-all` и `west build-one` — это расширения west, объявленные в
-`west-commands.yml` этого репозитория. Они появляются сразу после `west init`,
-отдельно ставить их не нужно.
+`docs/install.md` lists what to install and `docs/manual.md` every option. `.\recipe.ps1 test` runs the tests, mypy and ruff; the tests start no build and need no workspace.
 
-```powershell
-west build-all                          # все девять, Release
-west build-all --only CppMiddleProject1 # один проект
-west build-all --only CppMiddleProject1,Mandelbrot-Fractal
-west build-all --jobs 3                 # три проекта одновременно
-west build-all --skip-tests --clean
-west build-one CppMiddleProject5        # то же для одного проекта
-west build-all --help
-```
+## Licence
 
-Поведение, на которое можно полагаться:
-
-* сборка **не останавливается** на первом провале — нужно знать состояние всех
-  девяти, а не только первого сломанного;
-* в конце печатается таблица и строка `Итог: собрано N из M`;
-* код возврата **1**, если провалился хотя бы один проект (годится для CI);
-* полный вывод каждой сборки пишется в `build-logs/<Проект>.log`;
-* при `--jobs 1` (по умолчанию) вывод сборки идёт в терминал живьём; при `--jobs N`
-  — только в лог-файлы, потому что перемешанный вывод трёх компиляторов читать
-  невозможно;
-* проект, который не склонирован или потерял `scripts\build_windows.ps1`,
-  считается провалом, а не пропуском: несостоявшаяся сборка не должна давать
-  зелёный код возврата.
-
-Ничего своего эти команды не собирают. Они запускают `scripts\build_windows.ps1`
-каждого проекта — тот самый скрипт, который вносит окружение MSVC, при
-необходимости зовёт Conan, конфигурирует CMake по `CMakePresets.json`, собирает и
-прогоняет ctest. Единственное определение «этот проект собирается» живёт в самом
-проекте.
-
-## Что нужно поставить заранее
-
-| Инструмент | Зачем | Проверка |
-| --- | --- | --- |
-| **Visual Studio 2022** (Desktop development with C++) | компилятор MSVC и `vcvars64.bat` | `where cl` внутри Developer PowerShell |
-| **CMake ≥ 3.25** | пресеты из `CMakePresets.json` | `cmake --version` |
-| **Ninja** | генератор, который используют пресеты | `ninja --version` |
-| **Conan 2** | зависимости (Boost, OpenSSL, GTest) | `conan --version` |
-| **Python 3.9+ и west** | сам воркспейс | `west --version` |
-| **Git** | клонирование | `git --version` |
-
-Отдельно входить в Developer PowerShell не нужно: `build_windows.ps1` каждого
-проекта сам находит Visual Studio через `vswhere` и вносит окружение MSVC в свой
-процесс.
-
-`pip install west` на Windows кладёт `west.exe` в
-`%APPDATA%\Python\Python3XX\Scripts`, и этого каталога в `PATH` может не быть.
-Если оболочка не находит команду, добавьте каталог в `PATH` (или зовите
-`python -m west` — работает так же).
-
-Один проект требует большего. **CppMiddleProject8** — это clang-tool, ему нужна
-девелоперская поставка LLVM/Clang 19+ (заголовки и `lib\cmake\clang\ClangConfig.cmake`).
-Обычного установщика `LLVM-<версия>-win64.exe` не хватает: в нём только `clang.exe`
-и C API. Нужен архив `clang+llvm-<версия>-x86_64-pc-windows-msvc.tar.xz` с той же
-страницы релиза:
-
-```powershell
-curl.exe -L -o "$env:TEMP\clang+llvm.tar.xz" `
-  https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.8/clang+llvm-20.1.8-x86_64-pc-windows-msvc.tar.xz
-New-Item -ItemType Directory -Force C:\LLVM | Out-Null
-python -m tarfile -e "$env:TEMP\clang+llvm.tar.xz" C:\LLVM
-```
-
-Распаковка идёт Python-ом не от хорошей жизни: `tar.exe`, встроенный в Windows 10
-(bsdtar 3.5.2), собран без LZMA и на `tar -xJf` падает с
-`Can't initialize filter; unable to run program "xz -d -qq"`. Python здесь и так
-нужен — на нём работает сам west. На Python 3.12+ команда печатает
-`DeprecationWarning` про будущий фильтр по умолчанию; это не ошибка.
-
-Внутри архива один каталог, `clang+llvm-20.1.8-x86_64-pc-windows-msvc`, так что
-после распаковки путь получается `C:\LLVM\clang+llvm-20.1.8-x86_64-pc-windows-msvc`.
-Распакованный в `C:\LLVM\` дистрибутив `scripts\build_windows.ps1` находит сам —
-ни переменной окружения, ни ключа не нужно. Лежит в другом месте — задайте
-`CT_CLANG_INSTALL_DIR`. Без дистрибутива `west build-all` соберёт восемь проектов
-из девяти и честно покажет `ПРОВАЛ` на восьмом. Проверено на 20.1.8: архив
-896 МиБ, около 4 ГиБ после распаковки, та же мажорная версия, что и LLVM 20 в
-dev-контейнере этого проекта.
-
-Первый `west build-all` заметно дольше последующих: Conan скачивает пакеты, а
-часть зависимостей в некоторых проектах собирается из исходников (Boost) — это
-часы, а не минуты. Clang/LLVM в этот счёт не входит: он не идёт через Conan и не
-собирается из исходников, а берётся готовым из архива выше.
-`--build-type Debug` дольше `Release`: готовых Debug-бинарников для MSVC
-в conan-center нет.
-
-## Docker никуда не делся
-
-`.devcontainer` в каждом из девяти проектов **не тронут и продолжает работать**.
-Windows-сборку добавили *рядом*, а не *вместо*: на Linux и в VS Code Remote
-Containers всё собирается ровно как раньше, через контейнер. Этот воркспейс —
-второй путь к тем же бинарникам, для тех, у кого под рукой Windows и Visual
-Studio, а не Docker.
-
-## Как это устроено
-
-* `west.yml` — манифест: remote `IGORSVOLOHOVS`, девять проектов с реальными
-  ветками и путями внутри `projects/`. Секция `self` подключает `west-commands.yml`.
-* `west-commands.yml` — регистрация расширений west.
-* `scripts/west_commands/cpp_build_commands.py` — реализация обеих команд. Обе
-  лежат в одном файле намеренно: west импортирует файл расширения по пути и не
-  добавляет его каталог в `sys.path`, так что соседний модуль оттуда не
-  импортировался бы.
-
-Обновить набор проектов после изменения манифеста:
-
-```powershell
-cd cpp-west-workspace
-git pull
-cd ..
-west update
-```
-
-## Лицензия
-
-MIT, см. [LICENSE](LICENSE).
+MIT, see `LICENSE`.
