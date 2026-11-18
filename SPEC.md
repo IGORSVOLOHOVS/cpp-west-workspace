@@ -3,6 +3,27 @@
 Reverse-engineered on 2026-11-18 from commit `63be24b`. Every requirement cites the line that implements it.
 Inferences are labelled. Paths without a directory refer to `scripts/west_commands/cpp_build_commands.py`.
 
+<!-- jira-sync:start -->
+Jira: KAN-93
+
+## Tasks
+
+This list is one ticket in Jira project KAN, [KAN-93](https://igorsvolohovs.atlassian.net/browse/KAN-93). Each line is a checkbox there: tick it in Jira and the sync ticks it here; add a checkbox there and it is appended here. Done items are the features described in section 3; open items are what the project declares but the code does not do yet.
+
+- [x] Manifest and registration (section 3) <!-- spec-manifest-and-registration -->
+- [x] Project selection (section 3) <!-- spec-project-selection -->
+- [x] Invocation of a project build (section 3) <!-- spec-invocation-of-a-project-build -->
+- [x] Outcome of one project (section 3) <!-- spec-outcome-of-one-project -->
+- [x] Logging and terminal output (section 3) <!-- spec-logging-and-terminal-output -->
+- [x] Running several builds (section 3) <!-- spec-running-several-builds -->
+- [x] Summary and verdict (section 3) <!-- spec-summary-and-verdict -->
+- [x] Repository standard (section 3) <!-- spec-repository-standard -->
+- [ ] `west.yml:11-16` and `README.md:17` state that each revision is the repository's real default branch and that (declared, not implemented) <!-- spec-west-yml-11-16-and-readme-md-17-state-that-each-re -->
+- [ ] `west.yml:7-9` says `west update` reproduces the tree "on the right revisions, every time". (declared, not implemented) <!-- spec-west-yml-7-9-says-west-update-reproduces-the-tree- -->
+- [ ] The build behaviour described in `README.md:20` (Conan, CMake preset, ctest) belongs to the projects' scripts and (declared, not implemented) <!-- spec-the-build-behaviour-described-in-readme-md-20-cona -->
+
+<!-- jira-sync:end -->
+
 ## 1. Purpose and scope
 
 The system is the manifest repository of a west workspace of nine C++ repositories, plus two west extension
